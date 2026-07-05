@@ -1,36 +1,39 @@
 # Finance
 
-Monorepo unificato per trading, portafoglio e segnali azionari.
+Personal investment management monorepo. Import transactions, track positions & P&L, compute technical indicators, generate trading signals, refresh market data, optimize portfolio allocation.
 
-## Struttura
+## Pipeline
 
 ```
-packages/          # Python uv workspace (librerie condivise)
-  core/            # modelli DB, tipi, exchange config
-  market-data/     # provider astratto (Polygon, yfinance, Finnhub)
-  indicators/      # SMA, RSI, EMA, divergenza, BB, MACD, stocastico
-  signal-engine/   # segnali tecnici + AI
-  portfolio/       # posizioni, P&L, trade journal
-  optimizer/       # wrapper portfolio-optimization (MTD + Markowitz)
-apps/              # Applicazioni
-  backend/         # FastAPI (chiama packages/)
-  desktop/         # TradeForge React SPA
-  mobile/          # Stock Signal PWA
-  workers/         # Cloudflare Workers (API proxy, CDN)
-cli/               # Script operativi
-archive/           # Link simbolici ai progetti originali
+Market Data ──► Indicators ──► Signals ──► Portfolio ──► Optimizer ──► API
+(TradingView)   (SMA/RSI/     (composite    (positions,   (MTD +        (FastAPI)
+ yfinance)       MACD/BB)      scoring)      P&L, CSV      Markowitz)
+                                             import)
+```
+
+## Structure
+
+```
+packages/
+  core/            # SQLAlchemy ORM models, DB engine, config, trading calendar
+  market-data/     # Market data providers (TradingView, yfinance)
+  indicators/      # 32 pure-Python technical indicators
+  signal-engine/   # Signal generation + composite scoring
+  portfolio/       # Positions, P&L, Scalable Capital CSV import
+  ai-signals/      # HTTP adapter for external AI signal Worker
+  optimizer/       # Portfolio optimization (MTD, assortativity, Markowitz)
+  backend/         # FastAPI server (CSV import, market data refresh)
 ```
 
 ## Setup
 
 ```bash
-make install       # uv sync + npm install in tutti i sub-progetti
-make dev-backend   # FastAPI su :8000
-make dev-desktop   # React su :5173
-make dev-mobile    # PWA su :5174 (o diverso)
+make install       # uv sync --all-packages
+make dev           # FastAPI on :8000
+make test          # run tests
+make lint          # ruff check
 ```
 
-## Progetti originali (NON eliminare fino a migrazione completa)
+## Status
 
-I progetti originali restano in `~/Coding/` finché la migrazione non è
-completata e verificata. Vedi `TODO.md`.
+Active development. Backend functional. Frontends (web/CLI) planned.
