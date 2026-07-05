@@ -1,0 +1,29 @@
+[project]
+name = "finance-backend"
+version = "0.1.0"
+description = "Finance backend API"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.18",
+    "finance-portfolio",
+    "finance-market-data",
+]
+
+[tool.uv.sources]
+finance-portfolio = { path = "../../packages/portfolio" }
+finance-market-data = { path = "../../packages/market-data" }
+finance-core = { path = "../../packages/core" }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "httpx>=0.27",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

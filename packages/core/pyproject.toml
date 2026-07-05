@@ -1,0 +1,19 @@
+[project]
+name = "finance-core"
+version = "0.1.0"
+description = "Core domain models, types, exchange configs"
+requires-python = ">=3.12"
+dependencies = ["sqlalchemy>=2.0", "pytz"]
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[dependency-groups]
+dev = ["pytest>=8"]

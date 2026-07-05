@@ -1,0 +1,40 @@
+[project]
+name = "finance-workspace"
+version = "0.1.0"
+description = "Finance monorepo — Python workspace root"
+requires-python = ">=3.12"
+
+[tool.uv.sources]
+finance-core = { workspace = true }
+finance-market-data = { workspace = true }
+finance-indicators = { workspace = true }
+finance-signal-engine = { workspace = true }
+finance-ai-signals = { workspace = true }
+finance-portfolio = { workspace = true }
+finance-optimizer = { workspace = true }
+
+[tool.uv.workspace]
+members = [
+    "core",
+    "market-data",
+    "indicators",
+    "signal-engine",
+    "ai-signals",
+    "portfolio",
+    "optimizer",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.20",
+]

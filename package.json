@@ -1,0 +1,10 @@
+{
+  "name": "finance",
+  "private": true,
+  "scripts": {
+    "dev:desktop": "cd apps/desktop && npm run dev",
+    "dev:mobile": "cd apps/mobile && npm run dev",
+    "build:desktop": "cd apps/desktop && npm run build",
+    "build:mobile": "cd apps/mobile && npm run build"
+  }
+}
