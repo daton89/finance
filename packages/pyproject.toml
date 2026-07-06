@@ -12,6 +12,7 @@ finance-signal-engine = { workspace = true }
 finance-ai-signals = { workspace = true }
 finance-portfolio = { workspace = true }
 finance-optimizer = { workspace = true }
+finance-backend = { workspace = true }
 
 [tool.uv.workspace]
 members = [
@@ -22,6 +23,7 @@ members = [
     "ai-signals",
     "portfolio",
     "optimizer",
+    "backend",
 ]
 
 [tool.ruff]
