@@ -17,6 +17,8 @@ live script would be read/acted on when checked once per day after close.
 
 Usage:
     uv run python scripts/backtest.py [--years 5] [--tickers MU AMD]
+    uv run python scripts/backtest.py --compare          # rank rule variants
+    uv run python scripts/backtest.py --variant exit-ema20   # full report, one variant
 """
 
 import argparse
@@ -65,6 +67,40 @@ def fetch_close(ticker: str, years: int) -> pd.Series:
     return close.dropna()
 
 
+# ── Strategy variants ────────────────────────────────────────────────────────
+#
+# Ogni variante è un dict di parametri per simulate():
+#   entry: "rsi_cross" (RSI risale sopra entry_rsi & price>EMA20)
+#          "rsi_over"  (RSI > entry_rsi & price>EMA20 — meno restrittiva)
+#          "ema_cross" (EMA10 incrocia sopra EMA20)
+#          "breakout"  (chiusura > massimo 20gg precedente)
+#   exit_ema:     periodo EMA sotto cui vendere (None = disattivo)
+#   exit_rsi:     soglia RSI di vendita (None = disattivo)
+#   stop_pct:     stop fisso da entry (0.93 = -7%; None = disattivo)
+#   trailing_pct: trailing stop dal massimo post-entry (None = disattivo)
+
+VARIANTS = {
+    "live": dict(entry="rsi_cross", entry_rsi=35, exit_ema=10, exit_rsi=70,
+                 stop_pct=0.93, trailing_pct=None),
+    "exit-ema20": dict(entry="rsi_cross", entry_rsi=35, exit_ema=20, exit_rsi=70,
+                       stop_pct=0.93, trailing_pct=None),
+    "exit-ema50": dict(entry="rsi_cross", entry_rsi=35, exit_ema=50, exit_rsi=None,
+                       stop_pct=0.93, trailing_pct=None),
+    "entry-rsi50": dict(entry="rsi_cross", entry_rsi=50, exit_ema=20, exit_rsi=None,
+                        stop_pct=0.93, trailing_pct=None),
+    "entry-rsi-over45": dict(entry="rsi_over", entry_rsi=45, exit_ema=20, exit_rsi=None,
+                             stop_pct=0.93, trailing_pct=None),
+    "ema-cross": dict(entry="ema_cross", entry_rsi=None, exit_ema=20, exit_rsi=None,
+                      stop_pct=0.93, trailing_pct=None),
+    "breakout20": dict(entry="breakout", entry_rsi=None, exit_ema=20, exit_rsi=None,
+                       stop_pct=0.93, trailing_pct=None),
+    "breakout-trail15": dict(entry="breakout", entry_rsi=None, exit_ema=None, exit_rsi=None,
+                             stop_pct=0.93, trailing_pct=0.15),
+    "ema-cross-trail15": dict(entry="ema_cross", entry_rsi=None, exit_ema=None, exit_rsi=None,
+                              stop_pct=0.93, trailing_pct=0.15),
+}
+
+
 # ── Trade simulation ─────────────────────────────────────────────────────────
 
 
@@ -85,27 +121,39 @@ class Trade:
         return (self.exit_price - self.entry_price) / self.entry_price * 100
 
 
-def simulate(ticker: str, close: pd.Series, capital: float):
+def simulate(ticker: str, close: pd.Series, capital: float, params: dict | None = None):
     """Long-only simulation, full allocation on BUY, exit fully on SELL.
+
+    params: variante di strategia (vedi VARIANTS). Default = regole live.
 
     Returns dict with equity curve (pd.Series indexed like close), trades list,
     and final cash/shares state (position may still be open at series end —
     in that case we mark-to-market for equity curve purposes but do not close
     the trade for win/loss stats).
     """
+    p = params or VARIANTS["live"]
+
     rsi_vals = rsi(close, 14)
     ema10 = ema(close, 10)
     ema20 = ema(close, 20)
+    ema50 = ema(close, 50)
+    emas = {10: ema10, 20: ema20, 50: ema50}
+    high20 = close.rolling(20).max().shift(1)  # massimo 20gg precedente (escluso oggi)
+
+    exit_ema_series = emas.get(p["exit_ema"]) if p["exit_ema"] else None
 
     cash = capital
     shares = 0
     entry_price = None
+    peak_since_entry = None
     trades: list[Trade] = []
     open_trade: Trade | None = None
 
     equity = pd.Series(index=close.index, dtype=float)
 
     prev_rsi = None
+    prev_ema10 = None
+    prev_ema20 = None
     for i, dt in enumerate(close.index):
         price = float(close.iloc[i])
         cur_rsi = float(rsi_vals.iloc[i])
@@ -115,15 +163,17 @@ def simulate(ticker: str, close: pd.Series, capital: float):
         in_position = shares > 0
 
         if in_position:
-            stop = entry_price * STOP_PCT
+            peak_since_entry = max(peak_since_entry, price)
             sell = False
             reason = None
-            if price <= stop:
-                sell, reason = True, "stop -7%"
-            elif cur_rsi > RSI_SELL:
-                sell, reason = True, "RSI>70"
-            elif price < cur_ema10:
-                sell, reason = True, "price<EMA10"
+            if p["stop_pct"] and price <= entry_price * p["stop_pct"]:
+                sell, reason = True, f"stop {(p['stop_pct'] - 1) * 100:.0f}%"
+            elif p["exit_rsi"] and cur_rsi > p["exit_rsi"]:
+                sell, reason = True, f"RSI>{p['exit_rsi']}"
+            elif exit_ema_series is not None and price < float(exit_ema_series.iloc[i]):
+                sell, reason = True, f"price<EMA{p['exit_ema']}"
+            elif p["trailing_pct"] and price <= peak_since_entry * (1 - p["trailing_pct"]):
+                sell, reason = True, f"trail -{p['trailing_pct'] * 100:.0f}%"
 
             if sell:
                 cash += shares * price
@@ -134,12 +184,26 @@ def simulate(ticker: str, close: pd.Series, capital: float):
                 open_trade = None
                 shares = 0
                 entry_price = None
+                peak_since_entry = None
                 in_position = False
 
         if not in_position and prev_rsi is not None:
-            rsi_cross = prev_rsi < RSI_BUY_CROSS and cur_rsi >= RSI_BUY_CROSS
-            price_over_ema20 = price > cur_ema20
-            if rsi_cross and price_over_ema20:
+            entry_mode = p["entry"]
+            if entry_mode == "rsi_cross":
+                buy = (prev_rsi < p["entry_rsi"] and cur_rsi >= p["entry_rsi"]
+                       and price > cur_ema20)
+            elif entry_mode == "rsi_over":
+                buy = cur_rsi > p["entry_rsi"] and price > cur_ema20
+            elif entry_mode == "ema_cross":
+                buy = (prev_ema10 is not None and prev_ema10 <= prev_ema20
+                       and cur_ema10 > cur_ema20)
+            elif entry_mode == "breakout":
+                h20 = high20.iloc[i]
+                buy = not pd.isna(h20) and price > float(h20)
+            else:
+                raise ValueError(f"Unknown entry mode: {entry_mode}")
+
+            if buy:
                 alloc_amount = cash  # full allocation of this ticker's cash bucket
                 buy_shares = int(alloc_amount / price)
                 if buy_shares > 0:
@@ -147,10 +211,13 @@ def simulate(ticker: str, close: pd.Series, capital: float):
                     cash -= cost
                     shares = buy_shares
                     entry_price = price
+                    peak_since_entry = price
                     open_trade = Trade(dt, price)
 
         equity.iloc[i] = cash + shares * price
         prev_rsi = cur_rsi
+        prev_ema10 = cur_ema10
+        prev_ema20 = cur_ema20
 
     return {
         "equity": equity,
@@ -300,6 +367,67 @@ def capital_total_alloc(capital: float, close: pd.Series) -> pd.Series:
     return capital * (close / close.iloc[0])
 
 
+# ── Variant comparison ───────────────────────────────────────────────────────
+
+
+def compare_variants(tickers: list[str], years: int):
+    """Esegue tutte le VARIANTS su ogni ticker e stampa classifica combinata."""
+    closes = {}
+    for t in tickers:
+        try:
+            closes[t] = fetch_close(t, years)
+        except Exception as e:
+            print(f"{t}: ERROR fetching data — {e}")
+    if not closes:
+        sys.exit(1)
+
+    n = len(closes)
+    cap = CAPITAL / n
+
+    # Buy & hold benchmark combinato
+    bh_total = None
+    for t, close in closes.items():
+        bh = capital_total_alloc(cap, close)
+        bh_total = bh if bh_total is None else bh_total.add(bh, fill_value=0)
+    bh_total = bh_total.dropna()
+    bh_ret = (bh_total.iloc[-1] / bh_total.iloc[0] - 1) * 100
+    bh_mdd = max_drawdown(bh_total)
+
+    rows = []
+    for name, params in VARIANTS.items():
+        total_eq = None
+        n_trades = 0
+        wins = 0
+        for t, close in closes.items():
+            sim = simulate(t, close, cap, params)
+            eq = sim["equity"].dropna()
+            total_eq = eq if total_eq is None else total_eq.add(eq, fill_value=0)
+            st = trade_stats(sim["trades"])
+            n_trades += st["n"]
+            wins += round(st["n"] * st["win_rate"] / 100)
+        total_eq = total_eq.dropna()
+        ret = (total_eq.iloc[-1] / total_eq.iloc[0] - 1) * 100
+        mdd = max_drawdown(total_eq)
+        cg = cagr(total_eq)
+        roll = rolling_30d_returns(total_eq).dropna()
+        hit10 = (roll >= 10).mean() * 100 if not roll.empty else 0.0
+        win_rate = wins / n_trades * 100 if n_trades else 0.0
+        rows.append((name, ret, cg, mdd, n_trades, win_rate, hit10))
+
+    rows.sort(key=lambda r: r[1], reverse=True)
+
+    print(f"VARIANT COMPARISON — {', '.join(closes)} | {years}y | combined 50/50 portfolio")
+    print(f"Benchmark Buy&Hold: return {bh_ret:+.1f}%  maxDD {bh_mdd:.1f}%")
+    print("=" * 78)
+    print(f"{'variant':<20}{'return':>9}{'CAGR':>8}{'maxDD':>8}{'trades':>8}"
+          f"{'win%':>7}{'m>=10%':>8}")
+    for name, ret, cg, mdd, n_tr, wr, hit10 in rows:
+        print(f"{name:<20}{ret:>+8.1f}%{cg:>+7.1f}%{mdd:>7.1f}%{n_tr:>8}"
+              f"{wr:>6.0f}%{hit10:>7.1f}%")
+    print("=" * 78)
+    print("m>=10% = % di finestre rolling 21gg con ritorno >= +10% (target mensile)")
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 
@@ -307,17 +435,27 @@ def main():
     parser = argparse.ArgumentParser(description="Backtest the swing momentum strategy")
     parser.add_argument("--years", type=int, default=5, help="Lookback period in years")
     parser.add_argument("--tickers", nargs="+", default=TICKERS_DEFAULT, help="Tickers to test")
+    parser.add_argument("--compare", action="store_true",
+                        help="Confronta tutte le varianti di regole e stampa classifica")
+    parser.add_argument("--variant", choices=sorted(VARIANTS), default="live",
+                        help="Variante di regole per il report completo (default: live)")
     args = parser.parse_args()
 
     tickers = args.tickers
     years = args.years
+
+    if args.compare:
+        compare_variants(tickers, years)
+        return
+
+    params = VARIANTS[args.variant]
 
     # Rebuild allocation map for arbitrary ticker lists (equal split)
     n = len(tickers)
     alloc = {t: 1.0 / n for t in tickers} if n else {}
 
     today = date.today().strftime("%Y-%m-%d")
-    print(f"SWING MOMENTUM BACKTEST — {today}")
+    print(f"SWING MOMENTUM BACKTEST — {today} — variant: {args.variant}")
     print(f"Tickers: {', '.join(tickers)} | Period: {years}y | Capital: {CAPITAL:.0f} EUR (50/50 split)")
     print("Execution: signal + trade both evaluated on same day's close (close-on-signal-day).")
     print("=" * 60)
@@ -330,7 +468,7 @@ def main():
             print(f"{ticker}: ERROR fetching data — {e}")
             continue
         cap = CAPITAL * alloc[ticker]
-        sim = simulate(ticker, close, cap)
+        sim = simulate(ticker, close, cap, params)
         results[ticker] = {"close": close, "sim": sim, "capital": cap}
         print()
         print(per_ticker_report(ticker, close, sim, cap))
