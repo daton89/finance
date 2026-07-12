@@ -25,8 +25,8 @@ SCRIPTS = [
     ("RISK", ["scripts/risk_agent.py"]),
     ("RESEARCH", ["scripts/research_agent.py"]),
     ("PORTFOLIO", ["scripts/portfolio_manager.py"]),
-    # --force: il digest vuole sempre il report completo, non il delta
-    ("SIGNALS", ["scripts/swing_signals.py", "--force"]),
+    # Progresso transizione ETF-only (ADR-0001/0002)
+    ("TRANSITION", ["scripts/portfolio_manager.py", "transition"]),
 ]
 
 

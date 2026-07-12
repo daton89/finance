@@ -7,7 +7,9 @@ Tasks:
   - Calcola allocazione % per ogni posizione
   - Confronta allocazione reale vs target
   - Traccia P&L per posizione e totale
-  - Propone ribilanciamenti quando una posizione devia >20% dal target
+  - Propone ribilanciamenti quando una posizione devia oltre la banda di 5pp
+    assoluti dal target (config/target_allocation.json; fallback storico a
+    deviazione relativa sul solo fondo swing se il config manca)
   - Salva snapshot mensile per confronto P&L
 """
 
@@ -43,7 +45,8 @@ GBP_TO_EUR = 1.19
 # For the swing trading portion (10k), MU/AMD = 50/50
 # For the core portfolio, we monitor but don't rebalance aggressively
 TARGET_SWING = {"MU": 0.50, "AMD": 0.50}
-REBALANCE_THRESHOLD = 0.20  # 20% deviation from target triggers suggestion
+REBALANCE_THRESHOLD = 0.20  # legacy: 20% relative deviation (swing-only fallback)
+REBALANCE_BAND_PP = 5.0  # banda di ribilanciamento: 5 punti percentuali assoluti dal target (CONTEXT.md)
 
 
 def load_portfolio() -> dict:
@@ -66,6 +69,15 @@ def load_target_allocation() -> dict:
         with open(TARGET_ALLOCATION_PATH) as f:
             return json.load(f).get("target", {})
     return {}
+
+
+def load_etc_tickers() -> set:
+    """Ticker marcati 'etf' in portfolio.json ma fiscalmente ETC (redditi diversi,
+    abbinabili a stock nel tax pairing). Vedi 'Abbinamento fiscale' in CONTEXT.md."""
+    if os.path.exists(TARGET_ALLOCATION_PATH):
+        with open(TARGET_ALLOCATION_PATH) as f:
+            return set(json.load(f).get("etc_tickers", []))
+    return set()
 
 
 def load_pm_state() -> dict:
@@ -275,7 +287,44 @@ def analyze_portfolio() -> dict:
         result["swing"]["active_pnl_pct"] = round(((swing_active_value / swing_active_cost) - 1) * 100, 2)
 
     # ── Rebalancing suggestions ──
-    if result["swing"]["positions"]:
+    # Banda di ribilanciamento (CONTEXT.md): deviazione massima tollerata di una
+    # posizione dal target è 5 punti percentuali assoluti. Sotto banda non si
+    # interviene. Usa i target ETF-only di config/target_allocation.json quando
+    # presente; se il config manca, ricade sul controllo storico a deviazione
+    # relativa sul solo fondo swing (MU/AMD).
+    rebalance_target = load_target_allocation()
+    if rebalance_target:
+        seen_target_keys = set()
+        for entry in result["positions"]:
+            key = entry["ticker"] or entry["name"]
+            seen_target_keys.add(key)
+            target_pct = rebalance_target.get(key, 0.0) * 100
+            current_pct = entry["weight_pct"]
+            deviation_pp = current_pct - target_pct
+
+            if abs(deviation_pp) > REBALANCE_BAND_PP:
+                direction = "vendi" if deviation_pp > 0 else "compra"
+                amount = round(abs(deviation_pp) / 100 * total_value, 2)
+                result["rebalance_suggestions"].append(
+                    f"{entry['name']}: {direction} ~{amount:,.0f}€ "
+                    f"(attuale {current_pct:.1f}%, target {target_pct:.1f}%, "
+                    f"scostamento {deviation_pp:+.1f}pp — banda {REBALANCE_BAND_PP:.0f}pp)"
+                )
+
+        # CASH target senza posizione esplicita in portfolio.json
+        if "CASH" in rebalance_target and "CASH" not in seen_target_keys:
+            target_pct = rebalance_target["CASH"] * 100
+            deviation_pp = 0.0 - target_pct
+            if abs(deviation_pp) > REBALANCE_BAND_PP:
+                amount = round(abs(deviation_pp) / 100 * total_value, 2)
+                result["rebalance_suggestions"].append(
+                    f"Cassa: accumula ~{amount:,.0f}€ "
+                    f"(attuale 0.0%, target {target_pct:.1f}%, "
+                    f"scostamento {deviation_pp:+.1f}pp — banda {REBALANCE_BAND_PP:.0f}pp)"
+                )
+    elif result["swing"]["positions"]:
+        # Fallback storico (solo se manca config/target_allocation.json): deviazione
+        # relativa >20% sul fondo swing.
         swing_total = swing.get("cash", 0) + swing_active_value
         for ticker, alloc_pct in TARGET_SWING.items():
             if ticker in result["swing"]["positions"]:
@@ -351,11 +400,13 @@ def analyze_portfolio() -> dict:
 
 def analyze_transition() -> dict:
     """Confronta l'allocazione attuale con il target ETF-only e propone vendite
-    con abbinamento fiscale gain/loss (minusvalenze non compensano redditi di
-    capitale degli ETF, quindi si abbinano vendite in gain e in loss nello
-    stesso anno fiscale)."""
+    con abbinamento fiscale gain/loss di stock ed ETC (redditi diversi,
+    compensabili tra loro; le minusvalenze non compensano i redditi di capitale
+    degli ETF, quindi si abbinano vendite in gain e in loss nello stesso anno
+    fiscale)."""
     analysis = analyze_portfolio()
     target = load_target_allocation()
+    etc_tickers = load_etc_tickers()
     total_value = analysis["total_value"]
 
     rows = []
@@ -367,10 +418,13 @@ def analyze_transition() -> dict:
         target_pct = target.get(key, 0.0) * 100
         current_eur = p["value_eur"]
         target_eur = total_value * (target_pct / 100) if total_value else 0.0
+        # ISLN e simili sono marcati "etf" in portfolio.json ma fiscalmente sono ETC
+        # (redditi diversi, abbinabili a stock nel tax pairing) — vedi CONTEXT.md.
+        row_type = "etc" if key in etc_tickers else p["type"]
         rows.append({
             "key": key,
             "name": p["name"],
-            "type": p["type"],
+            "type": row_type,
             "current_pct": current_pct,
             "target_pct": target_pct,
             "delta_eur": round(target_eur - current_eur, 2),
@@ -397,8 +451,11 @@ def analyze_transition() -> dict:
     etf_target_current_pct = sum(r["current_pct"] for r in rows if r["key"] in target and r["key"] != "CASH")
     etf_target_goal_pct = sum(v * 100 for k, v in target.items() if k != "CASH")
 
-    # Stocks to sell (target 0) with unrealized P&L, for tax-loss pairing
-    to_sell = [r for r in rows if r["type"] == "stock" and target.get(r["key"], 0.0) == 0.0]
+    # Stock + ETC da vendere (target 0) con P&L non realizzato, per l'abbinamento
+    # fiscale gain/loss. Gli ETF sono esclusi: le loro plusvalenze sono "redditi di
+    # capitale" e non compensano le minusvalenze (vedi "Abbinamento fiscale" in
+    # CONTEXT.md).
+    to_sell = [r for r in rows if r["type"] in ("stock", "etc") and target.get(r["key"], 0.0) == 0.0]
     gains = sorted([r for r in to_sell if r["pnl_abs"] > 0], key=lambda r: -r["pnl_abs"])
     losses = sorted([r for r in to_sell if r["pnl_abs"] < 0], key=lambda r: r["pnl_abs"])
 
@@ -445,17 +502,20 @@ def report_transition():
     lines.append("")
 
     if t["to_sell"]:
-        lines.append("  💸 Vendite stock (target 0%), abbinamento fiscale gain/loss:")
+        lines.append("  💸 Vendite stock/ETC (target 0%), abbinamento fiscale gain/loss:")
         if t["pairs"]:
             for g, l in t["pairs"]:
+                g_tag = " [ETC]" if g["type"] == "etc" else ""
+                l_tag = " [ETC]" if l["type"] == "etc" else ""
                 lines.append(
-                    f"     {g['name'][:16]:16s} +{g['pnl_abs']:,.0f}€  ↔  {l['name'][:16]:16s} {l['pnl_abs']:,.0f}€"
+                    f"     {g['name'][:16]:16s}{g_tag} +{g['pnl_abs']:,.0f}€  ↔  {l['name'][:16]:16s}{l_tag} {l['pnl_abs']:,.0f}€"
                 )
         if t["unpaired"]:
             for u in t["unpaired"]:
                 tag = "gain non abbinato" if u["pnl_abs"] > 0 else "loss non abbinata"
-                lines.append(f"     ⚠️  {u['name'][:22]:22s} {u['pnl_abs']:+,.0f}€ — {tag}")
-        lines.append("     (suggerimento, verifica col commercialista)")
+                etc_tag = " [ETC]" if u["type"] == "etc" else ""
+                lines.append(f"     ⚠️  {u['name'][:22]:22s}{etc_tag} {u['pnl_abs']:+,.0f}€ — {tag}")
+        lines.append("     (stock ed ETC: redditi diversi, compensabili; ETF esclusi — suggerimento, verifica col commercialista)")
         lines.append("")
 
     if t["to_sell"]:
@@ -559,16 +619,15 @@ def report_allocation():
 
 
 def report_rebalance():
-    """Just rebalancing suggestions."""
+    """Suggerimenti di ribilanciamento: posizioni fuori banda (>5pp assoluti dal target)."""
     analysis = analyze_portfolio()
     if not analysis["rebalance_suggestions"]:
-        return "✅ Allocazione bilanciata — nessun ribilanciamento necessario."
-    lines = ["🔄 Rebalancing Request", ""]
+        return f"✅ Tutte le posizioni sono in banda (±{REBALANCE_BAND_PP:.0f}pp dal target) — nessun ribilanciamento necessario."
+    lines = [f"🔄 Ribilanciamento — posizioni fuori banda (>{REBALANCE_BAND_PP:.0f}pp dal target)", ""]
     for s in analysis["rebalance_suggestions"]:
         lines.append(f"  {s}")
     lines.append("")
-    lines.append(f"  Esegui l'operazione su Scalable Capital poi registra con:")
-    lines.append(f"    uv run python scripts/swing_signals.py enter <TICKER> <PREZZO> <AZIONI>")
+    lines.append(f"  Esegui l'operazione su Scalable Capital.")
     return "\n".join(lines)
 
 
