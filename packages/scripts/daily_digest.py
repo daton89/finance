@@ -20,7 +20,7 @@ from pathlib import Path
 
 PACKAGES_DIR = Path(__file__).resolve().parent.parent
 
-TIMEOUT_SECONDS = 120
+TIMEOUT_SECONDS = 240  # ai_signals può attendere ~60s extra su rate-limit Finnhub
 
 SCRIPTS = [
     ("RISK", ["scripts/risk_agent.py"]),
@@ -28,6 +28,8 @@ SCRIPTS = [
     ("PORTFOLIO", ["scripts/portfolio_manager.py"]),
     # Progresso transizione ETF-only (ADR-0001/0002)
     ("TRANSITION", ["scripts/portfolio_manager.py", "transition"]),
+    # Seconda opinione LLM (worker stock-signal) sugli stock in dismissione
+    ("AI", ["scripts/ai_signals.py"]),
 ]
 
 

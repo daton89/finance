@@ -35,8 +35,8 @@ def rsi(series: pd.Series, period: int = 14) -> pd.Series:
 
 # ── Data fetching ───────────────────────────────────────────────────────────
 
-_SCRIPT_DIR = Path(__file__).resolve().parent.parent.parent
-_PACKAGES_DIR = _SCRIPT_DIR  # packages/ is parent of core/
+# market.py vive in packages/core/src/finance_core/ → packages/ è 3 livelli su
+_PACKAGES_DIR = Path(__file__).resolve().parents[3]
 
 
 def fetch_close(ticker: str, period: str = "3mo", **kwargs) -> pd.Series:
