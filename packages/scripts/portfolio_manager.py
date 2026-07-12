@@ -214,8 +214,11 @@ def analyze_portfolio() -> dict:
         pos_type = pos.get("type", "stock")
         currency = pos.get("yf_currency", "USD")
 
-        cost = shares * avg_entry  # in original currency
-        cost_eur = convert_to_eur(cost, currency)
+        # avg_entry è nel prezzo di esecuzione Scalable/gettex (EUR di default),
+        # indipendente dalla valuta di quotazione yfinance
+        entry_currency = pos.get("entry_currency", currency)
+        cost = shares * avg_entry
+        cost_eur = convert_to_eur(cost, entry_currency)
 
         # Listing EUR (Xetra ~ gettex/Scalable) se presente: prezzo già in EUR
         eur_ticker = pos.get("eur_ticker", "")
