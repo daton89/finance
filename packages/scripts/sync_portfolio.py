@@ -50,7 +50,7 @@ _KNOWN_ISIN_TYPES = {
 _KNOWN_ISIN_TICKERS = {
     "US5951121038": "MU",
     "US0079031078": "AMD",
-    "US80004C2008": "",       # manual_only
+    "US80004C2008": "SNDK",
     "US5738741041": "MRVL",
     "US9581021055": "WDC",
     "US1999081045": "FIX",
@@ -113,6 +113,7 @@ _KNOWN_ISIN_EUR_TICKERS = {
     "US5951121038": "MTE.DE",    # MU
     "US0079031078": "AMD.DE",    # AMD
     "US9581021055": "WDC.DE",    # WDC
+    "LU2903252349": "SCWX.DE",   # Scalable MSCI AC World
 }
 
 
