@@ -40,6 +40,8 @@ def seed():
 
     stocks_created = 0
     holdings_created = 0
+    holdings_updated = 0
+    holdings_deduped = 0
     stocks_skipped = 0
 
     today = date.today()
@@ -75,22 +77,42 @@ def seed():
                 stocks_created += 1
                 print(f"  ✅ Created stock: {ticker} — {company_name}")
 
-            # Create Holding
-            holding = Holding(
-                ticker=stock.ticker,
-                entry_price=pos["avg_entry"],
-                entry_date=today,
-                shares=pos["shares"],
-                is_open=True,
-                notes=(
-                    f"Migrated from portfolio.json | "
-                    f"currency={yf_currency} | "
-                    f"isin={isin}"
-                ),
+            # Idempotent Holding: update existing open Holding or create new.
+            # Eventuali righe aperte extra per lo stesso ticker (duplicati di
+            # run precedenti) vengono chiuse — deve restarne UNA sola aperta.
+            open_holdings = (
+                db.query(Holding)
+                .filter(Holding.ticker == stock.ticker, Holding.is_open == True)
+                .order_by(Holding.id)
+                .all()
             )
-            db.add(holding)
-            holdings_created += 1
-            print(f"     → Created holding: {stock.ticker} @ {pos['avg_entry']} x {pos['shares']}")
+            if open_holdings:
+                keep = open_holdings[0]
+                keep.entry_price = pos["avg_entry"]
+                keep.shares = pos["shares"]
+                keep.entry_date = today
+                for dup in open_holdings[1:]:
+                    dup.is_open = False
+                    holdings_deduped += 1
+                holdings_updated += 1
+                extra = f" ({len(open_holdings) - 1} duplicati chiusi)" if len(open_holdings) > 1 else ""
+                print(f"     → Updated holding: {stock.ticker} @ {pos['avg_entry']} x {pos['shares']}{extra}")
+            else:
+                holding = Holding(
+                    ticker=stock.ticker,
+                    entry_price=pos["avg_entry"],
+                    entry_date=today,
+                    shares=pos["shares"],
+                    is_open=True,
+                    notes=(
+                        f"Migrated from portfolio.json | "
+                        f"currency={yf_currency} | "
+                        f"isin={isin}"
+                    ),
+                )
+                db.add(holding)
+                holdings_created += 1
+                print(f"     → Created holding: {stock.ticker} @ {pos['avg_entry']} x {pos['shares']}")
 
         db.commit()
         print(f"\n{'='*60}")
@@ -98,6 +120,8 @@ def seed():
         print(f"  Stocks created (new):   {stocks_created}")
         print(f"  Stocks skipped (dup):   {stocks_skipped}")
         print(f"  Holdings created:       {holdings_created}")
+        print(f"  Holdings updated:       {holdings_updated}")
+        print(f"  Holdings deduped:       {holdings_deduped}")
         print(f"{'='*60}")
 
     except Exception:

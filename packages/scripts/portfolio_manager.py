@@ -80,6 +80,14 @@ def load_etc_tickers() -> set:
     return set()
 
 
+def load_satellite_tickers() -> set:
+    """Ticker che vengono accreditati al bucket SATELLITE nel calcolo transizione."""
+    if os.path.exists(TARGET_ALLOCATION_PATH):
+        with open(TARGET_ALLOCATION_PATH) as f:
+            return set(json.load(f).get("satellite_tickers", []))
+    return set()
+
+
 def load_pm_state() -> dict:
     if os.path.exists(PM_STATE_PATH):
         with open(PM_STATE_PATH) as f:
@@ -229,6 +237,7 @@ def analyze_portfolio() -> dict:
         if price_ticker:
             current_price = prices.get(price_ticker) or get_price_single(price_ticker)
 
+        price_stale = False
         if current_price:
             market_value = shares * current_price
             market_value_eur = convert_to_eur(market_value, price_currency)
@@ -236,6 +245,7 @@ def analyze_portfolio() -> dict:
             # Fallback: use cost for manual-only positions
             market_value_eur = cost_eur
             current_price = avg_entry
+            price_stale = True
 
         pnl_abs = market_value_eur - cost_eur
         pnl_pct = ((pnl_abs / cost_eur) * 100) if cost_eur else 0
@@ -255,6 +265,7 @@ def analyze_portfolio() -> dict:
             "pnl_abs": round(pnl_abs, 2),
             "pnl_pct": round(pnl_pct, 2),
             "weight_pct": 0.0,  # calculated after total
+            "price_stale": price_stale,
         }
         result["positions"].append(pos_entry)
 
@@ -370,8 +381,15 @@ def analyze_portfolio() -> dict:
                         f"{ticker}: {direction} ~{amount:.0f}€ (devia {deviation:+.0f}%, target {alloc_pct*100:.0f}%)"
                     )
 
-    # ── Performance alerts ──
+    # ── Stale price warnings ──
     for entry in result["positions"]:
+        if entry.get("price_stale"):
+            result["alerts"].append(f"⚠️ {entry['name']}: prezzo non disponibile — P&L non affidabile")
+
+    # ── Performance alerts ── (escludi posizioni stale)
+    for entry in result["positions"]:
+        if entry.get("price_stale"):
+            continue
         if entry["pnl_pct"] < -10:
             result["alerts"].append(f"🔴 {entry['ticker'] or entry['name']}: -{abs(entry['pnl_pct']):.1f}%")
         elif entry["pnl_pct"] > 20:
@@ -437,18 +455,27 @@ def analyze_transition() -> dict:
     analysis = analyze_portfolio()
     target = load_target_allocation()
     etc_tickers = load_etc_tickers()
+    satellite_tickers = load_satellite_tickers()
     total_value = analysis["total_value"]
 
     rows = []
     seen_keys = set()
+    # Accumulate satellite positions under SATELLITE key
+    satellite_current_pct = 0.0
+    satellite_pnl_abs = 0.0
     for p in analysis["positions"]:
         key = p["ticker"] or p["name"]
+        if key in satellite_tickers:
+            # Aggregate into SATELLITE bucket
+            satellite_current_pct += p["weight_pct"]
+            satellite_pnl_abs += p["pnl_abs"]
+            continue
         seen_keys.add(key)
         current_pct = p["weight_pct"]
         target_pct = target.get(key, 0.0) * 100
         current_eur = p["value_eur"]
         target_eur = total_value * (target_pct / 100) if total_value else 0.0
-        # ISLN e simili sono marcati "etf" in portfolio.json ma fiscalmente sono ETC
+        # ISLN e simili sono marcati "etf" in portfolio.json ma fiscalmente ETC
         # (redditi diversi, abbinabili a stock nel tax pairing) — vedi CONTEXT.md.
         row_type = "etc" if key in etc_tickers else p["type"]
         rows.append({
@@ -460,6 +487,23 @@ def analyze_transition() -> dict:
             "delta_eur": round(target_eur - current_eur, 2),
             "pnl_pct": p["pnl_pct"],
             "pnl_abs": p["pnl_abs"],
+        })
+
+    # Emit aggregated SATELLITE row if target exists
+    if "SATELLITE" in target and satellite_tickers:
+        seen_keys.add("SATELLITE")
+        sat_target_pct = target["SATELLITE"] * 100
+        sat_target_eur = total_value * (sat_target_pct / 100) if total_value else 0.0
+        sat_current_eur = total_value * (satellite_current_pct / 100) if total_value else 0.0
+        rows.append({
+            "key": "SATELLITE",
+            "name": "Satellite",
+            "type": "satellite",
+            "current_pct": round(satellite_current_pct, 1),
+            "target_pct": sat_target_pct,
+            "delta_eur": round(sat_target_eur - sat_current_eur, 2),
+            "pnl_pct": 0.0,
+            "pnl_abs": round(satellite_pnl_abs, 2),
         })
 
     # CASH target with no matching position (not held explicitly)
@@ -630,7 +674,6 @@ def report_full():
 
     # Targets
     lines.append(sep)
-    lines.append(f"  🎯 Target: +10% mese sul fondo swing (10k→11k)")
     lines.append(f"  📈 Peak portafoglio:  {analysis.get('_peak', analysis['total_value']):,.2f}€")
 
     return "\n".join(lines)

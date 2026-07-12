@@ -326,7 +326,7 @@ def research_brief() -> str:
                 days_to = (earn_date - date.today()).days
                 beat = earnings.get("last_beat_pct")
                 est = earnings.get("next_eps_estimate")
-                beat_str = f" (last beat: {beat:+.1f}%)" if beat else ""
+                beat_str = f" (last beat: {beat:+.1f}%)" if beat is not None else ""
 
                 lines.append(f"  📅 Earnings: {earn_date} ({days_to}d away){beat_str}")
                 if est:

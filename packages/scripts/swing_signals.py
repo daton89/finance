@@ -167,8 +167,8 @@ def generate_signals() -> list[dict]:
                 signal = "BUY"
                 reason.append(f"RSI {prev_rsi:.1f}→{last_rsi:.1f} cross + prezzo > EMA20")
             elif rsi_cross:
-                signal = "BUY"
-                reason.append(f"RSI cross 35: {prev_rsi:.1f}→{last_rsi:.1f}")
+                signal = "HOLD"
+                reason.append(f"RSI cross ma prezzo < EMA20 — no entry")
             elif last_rsi < 35:
                 signal = "HOLD (watch)"
                 reason.append(f"RSI ipervenduto {last_rsi:.1f} — in attesa di inversione")

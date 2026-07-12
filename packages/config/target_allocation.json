@@ -13,5 +13,6 @@
     "default": "2026-10-31"
   },
   "etc_tickers": ["ISLN.L"],
+  "satellite_tickers": ["SMH", "QQQ"],
   "notes": "ETF-only target. Tutti gli stock (MU, AMD, MRVL, WDC, SanDisk, FIX) e Scalable MSCI AC World (overlap con CSPX) => target 0%. etc_tickers: posizioni marcate 'etf' in portfolio.json ma fiscalmente ETC (redditi diversi, abbinabili a stock nel tax pairing) — vedi 'Abbinamento fiscale' in CONTEXT.md."
 }

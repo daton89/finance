@@ -197,6 +197,8 @@ def parse_scalable_csv(filepath: str) -> list[dict]:
 
     # Filtra solo transazioni valide
     valid = []
+    discarded = 0
+    unknown_asset_types = set()
     for r in rows:
         status = r.get("status", "").lower()
         asset_type = r.get("assettype", r.get("asset_type", "")).lower()
@@ -204,15 +206,27 @@ def parse_scalable_csv(filepath: str) -> list[dict]:
         isin = r.get("isin", "").strip()
 
         if status != "executed":
+            discarded += 1
             continue
         if asset_type not in _VALID_ASSET_TYPES:
+            discarded += 1
+            if asset_type:
+                unknown_asset_types.add(asset_type)
             continue
         if tx_type not in ("buy", "sell"):
+            discarded += 1
             continue
         if not isin:
+            discarded += 1
             continue
 
         valid.append(r)
+
+    if discarded:
+        warn = f"⚠️ {discarded} righe scartate"
+        if unknown_asset_types:
+            warn += f" (assetType non riconosciuti: {', '.join(sorted(unknown_asset_types))})"
+        print(warn)
 
     return valid
 
@@ -317,11 +331,13 @@ def compute_fifo_cost_basis(transactions: list[dict]) -> list[dict]:
 
 def main():
     dry_run = "--dry-run" in sys.argv
-    args = [a for a in sys.argv[1:] if a not in ("--dry-run",)]
+    prune = "--prune" in sys.argv
+    args = [a for a in sys.argv[1:] if a not in ("--dry-run", "--prune")]
 
     if not args:
-        print("Uso: python3 sync_portfolio.py <scalable_export.csv> [--dry-run]")
+        print("Uso: python3 sync_portfolio.py <scalable_export.csv> [--dry-run] [--prune]")
         print("  --dry-run: mostra le modifiche senza salvare")
+        print("  --prune: rimuovi posizioni non presenti nel CSV (default: preserva)")
         sys.exit(1)
 
     csv_path = args[0]
@@ -368,29 +384,29 @@ def main():
 
         new_positions.append(pos)
 
-    # Posizioni rimosse (erano in old ma non in new) — preserva quelle manuali
+    # Posizioni rimosse (erano in old ma non in new) — preserva a meno di --prune
     new_isins = {p["isin"] for p in new_positions}
-    preserved_manual = 0
+    preserved = 0
     for isin, old in old_positions.items():
         if isin not in new_isins:
-            if old.get("manual_only", False):
-                # Preserva posizioni manuali che non sono nel CSV
+            if not prune:
                 new_positions.append(old)
-                preserved_manual += 1
+                changes.append(f"   ⚠️ {old['name']} ({isin}): non presente nel CSV — mantenuta (usa --prune per rimuoverla)")
+                preserved += 1
             else:
                 changes.append(f"   ❌ {old['name']} ({isin}): posizione chiusa/rimossa")
 
     if not changes:
         print("✅ Nessuna modifica — posizioni identiche.")
-        if preserved_manual:
-            print(f"   ({preserved_manual} posizioni manuali preservate)")
+        if preserved:
+            print(f"   ({preserved} posizioni preservate)")
         return
 
     print("\n📋 Modifiche rilevate:")
     for c in changes:
         print(c)
-    if preserved_manual:
-        print(f"\n🔒 {preserved_manual} posizioni manuali preservate (non nel CSV)")
+    if preserved:
+        print(f"\n🔒 {preserved} posizioni preservate (non nel CSV)")
 
     if dry_run:
         print("\n🔍 Dry-run — nessun file modificato.")

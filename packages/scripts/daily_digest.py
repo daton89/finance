@@ -3,8 +3,8 @@
 daily_digest.py — Morning Digest Agent.
 
 Runs the four deterministic finance scripts (risk_agent, research_agent,
-portfolio_manager, swing_signals) as subprocesses in their default
-report mode (no args) and concatenates their stdout into one combined,
+portfolio_manager default, portfolio_manager transition) as subprocesses in their
+default report mode (no args) and concatenates their stdout into one combined,
 clearly delimited output. Intended to be consumed by an LLM synthesis
 step (Hermes cron agent) that turns this into a short Telegram verdict.
 

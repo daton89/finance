@@ -144,12 +144,12 @@ def check_ticker(ticker: str, backstops: dict, verbose: bool = False) -> list[st
             lines.append(f"📊 {ticker} — RSI {rsi_val:.0f}, backstop tra {days_to_backstop} giorni ({backstop})")
 
     # Check conditions (silent mode: only output if triggered)
-    if rsi_val > 60:
-        lines.append(f"🔔 VENDI TRANCHE {ticker} — RSI {rsi_val:.0f} > 60 (vendita sulla forza, ADR-0002)")
-    elif days_to_backstop < 0:
+    if days_to_backstop < 0:
         lines.append(f"🚨 BACKSTOP SCADUTO {ticker} — vendi ora")
     elif 0 <= days_to_backstop <= 14:
         lines.append(f"⏰ BACKSTOP {ticker} — {days_to_backstop} giorni al {backstop.strftime('%Y-%m-%d')}: vendi il residuo a prescindere")
+    elif rsi_val > 60:
+        lines.append(f"🔔 VENDI TRANCHE {ticker} — RSI {rsi_val:.0f} > 60 (vendita sulla forza, ADR-0002)")
 
     return lines
 

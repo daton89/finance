@@ -11,9 +11,9 @@ Sei il mio assistente finanziario. Esegui questo comando nel terminale:
 /Users/daton/.hermes/scripts/daily_digest.sh
 
 Questo script lancia in sequenza 4 script deterministici (risk_agent,
-research_agent, portfolio_manager, swing_signals) e restituisce un output
+research_agent, portfolio_manager default, portfolio_manager transition) e restituisce un output
 combinato con sezioni === RISK ===, === RESEARCH ===, === PORTFOLIO ===,
-=== SIGNALS ===. Se una sezione contiene "SCRIPT FAILED", quello script
+=== TRANSITION ===. Se una sezione contiene "SCRIPT FAILED", quello script
 è andato in errore (timeout o eccezione) — segnalalo come tale, non
 inventare dati al suo posto.
 
