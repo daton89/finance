@@ -19,3 +19,6 @@ portfolio_history/
 .DS_Store
 .superpowers/
 dev-loop.log
+
+# Runtime state (swing positions, last signals)
+packages/data/
