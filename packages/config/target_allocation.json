@@ -1,11 +1,12 @@
 {
   "target": {
-    "CSPX.L": 0.50,
+    "CSPX.L": 0.45,
     "EMIM.L": 0.15,
     "WSML.L": 0.10,
     "IGLN.L": 0.10,
     "IUHC.L": 0.05,
-    "CASH": 0.10
+    "SATELLITE": 0.10,
+    "CASH": 0.05
   },
   "backstops": {
     "MU": "2026-09-15",

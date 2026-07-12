@@ -12,7 +12,10 @@ Il processo pianificato di migrazione del portafoglio da mix stock+ETF a solo ET
 La composizione obiettivo del portafoglio a fine transizione, definita in `packages/config/target_allocation.json`. Ogni posizione detenuta ma assente dalla target ha implicitamente target 0%.
 
 **Core**
-Il mattone principale della Target Allocation: CSPX (iShares Core S&P 500), 50%. Scelto rispetto a Scalable MSCI AC World (in dismissione, overlap ~60%) perché non esiste un PAC attivo e i mattoni separati (CSPX+EMIM+WSML) danno controllo sui pesi con TER inferiore.
+Il mattone principale della Target Allocation: CSPX (iShares Core S&P 500), 45%. Scelto rispetto a Scalable MSCI AC World (in dismissione, overlap ~60%) perché non esiste un PAC attivo e i mattoni separati (CSPX+EMIM+WSML) danno controllo sui pesi con TER inferiore.
+
+**Satellite**
+Bucket del 10% per momentum sistematico su ETF settoriali (SMH/QQQ), attivo solo a transizione MU completata. Solo strategie validate da backtest, mai stock singoli. Soggetto a kill-switch: -15% dal picco o -10pp vs CSPX su 12 mesi → confluisce nel core. Vedi ADR-0003.
 
 **Swing Fund** *(chiuso — vedi ADR-0001)*
 Ex fondo sperimentale da 10.000€ per swing trading su MU/AMD con target +10%/mese. Chiuso a luglio 2026: il capitale confluisce nella Transizione ETF. Il tooling (`swing_signals.py`, `backtest.py`) resta nel repo come strumento di analisi, non operativo.
