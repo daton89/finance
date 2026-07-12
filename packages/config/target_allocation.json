@@ -1,0 +1,11 @@
+{
+  "target": {
+    "CSPX.L": 0.50,
+    "EMIM.L": 0.15,
+    "WSML.L": 0.10,
+    "IGLN.L": 0.10,
+    "IUHC.L": 0.05,
+    "CASH": 0.10
+  },
+  "notes": "ETF-only target. Tutti gli stock (MU, AMD, MRVL, WDC, SanDisk, FIX) e Scalable MSCI AC World (overlap con CSPX) => target 0%."
+}
