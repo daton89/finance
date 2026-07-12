@@ -136,17 +136,37 @@ def get_price_single(ticker: str) -> float | None:
     return None
 
 
+_fx_cache: dict[str, float] = {}
+
+
+def _live_rate(pair: str, fallback: float) -> float:
+    """Tasso FX live da Yahoo (es. 'EURUSD=X'), con cache e fallback statico."""
+    if pair in _fx_cache:
+        return _fx_cache[pair]
+    try:
+        rate = float(yf.Ticker(pair).fast_info["last_price"])
+        if rate > 0:
+            _fx_cache[pair] = rate
+            return rate
+    except Exception:
+        pass
+    _fx_cache[pair] = fallback
+    return fallback
+
+
 def convert_to_eur(price: float, currency: str) -> float:
-    """Convert price to EUR for display."""
+    """Convert price to EUR for display. FX live con fallback statico."""
     if currency in ("EUR",):
         return price
+    usd_eur = 1.0 / _live_rate("EURUSD=X", 1.0 / EUR_RATE)
+    gbp_eur = _live_rate("GBPEUR=X", GBP_TO_EUR)
     if currency == "GBp":
         # GBp → GBP (÷100) → EUR
-        return (price / 100) * GBP_TO_EUR
+        return (price / 100) * gbp_eur
     if currency == "GBP":
-        return price * GBP_TO_EUR
+        return price * gbp_eur
     # USD → EUR
-    return price * EUR_RATE
+    return price * usd_eur
 
 
 # ── Portfolio Analysis ──
@@ -158,7 +178,9 @@ def analyze_portfolio() -> dict:
     pm = load_pm_state()
 
     positions = portfolio.get("positions", [])
-    tickers = [p.get("ticker") for p in positions if p.get("ticker")]
+    # Preferisci il listing EUR (Xetra ~ gettex/Scalable) quando disponibile
+    tickers = [p.get("eur_ticker") or p.get("ticker") for p in positions
+               if p.get("eur_ticker") or p.get("ticker")]
 
     prices = fetch_prices(tickers)
 
@@ -195,13 +217,18 @@ def analyze_portfolio() -> dict:
         cost = shares * avg_entry  # in original currency
         cost_eur = convert_to_eur(cost, currency)
 
+        # Listing EUR (Xetra ~ gettex/Scalable) se presente: prezzo già in EUR
+        eur_ticker = pos.get("eur_ticker", "")
+        price_ticker = eur_ticker or ticker
+        price_currency = "EUR" if eur_ticker else currency
+
         current_price = None
-        if ticker:
-            current_price = prices.get(ticker) or get_price_single(ticker)
+        if price_ticker:
+            current_price = prices.get(price_ticker) or get_price_single(price_ticker)
 
         if current_price:
             market_value = shares * current_price
-            market_value_eur = convert_to_eur(market_value, currency)
+            market_value_eur = convert_to_eur(market_value, price_currency)
         else:
             # Fallback: use cost for manual-only positions
             market_value_eur = cost_eur
