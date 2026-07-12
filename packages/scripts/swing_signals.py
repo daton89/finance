@@ -16,9 +16,10 @@ import os
 import sys
 from datetime import datetime, date
 
-import yfinance as yf
 import pandas as pd
 import numpy as np
+
+from finance_core.market import ema, rsi, fetch_close
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if os.path.basename(SCRIPT_DIR) == "scripts":
@@ -31,20 +32,6 @@ os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
 TICKERS = ["MU", "AMD"]
 CAPITAL = 10000.0          # 10k da far diventare 11k
 ALLOC = {"MU": 0.5, "AMD": 0.5}
-
-# ── Calcoli tecnici ──
-
-def ema(series: pd.Series, period: int) -> pd.Series:
-    return series.ewm(span=period, adjust=False).mean()
-
-def rsi(series: pd.Series, period: int = 14) -> pd.Series:
-    delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(span=period, adjust=False).mean()
-    avg_loss = loss.ewm(span=period, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    return 100 - (100 / (1 + rs))
 
 # ── Stato posizioni ──
 
@@ -105,17 +92,11 @@ def generate_signals() -> list[dict]:
     results = []
 
     for ticker in TICKERS:
-        # Fetch dati — yfinance ritorna MultiIndex columns anche per singolo ticker
-        raw = yf.download(ticker, period="3mo", interval="1d", auto_adjust=True)
-        if raw.empty:
+        try:
+            close = fetch_close(ticker, period="3mo")
+        except Exception:
             results.append({"ticker": ticker, "signal": "ERROR", "reason": "Nessun dato"})
             continue
-
-        # Se MultiIndex columns, estrai la serie Close per questo ticker
-        if isinstance(raw.columns, pd.MultiIndex):
-            close = raw["Close"][ticker]
-        else:
-            close = raw["Close"]
 
         last_close = float(close.iloc[-1])
         prev_close = float(close.iloc[-2]) if len(close) > 1 else last_close

@@ -27,45 +27,11 @@ from datetime import date
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
+
+from finance_core.market import ema, rsi, fetch_close
 
 TICKERS_DEFAULT = ["MU", "AMD"]
 CAPITAL = 10000.0
-ALLOC = {"MU": 0.5, "AMD": 0.5}
-STOP_PCT = 0.93
-RSI_BUY_CROSS = 35
-RSI_SELL = 70
-
-# ── Indicators (identical to swing_signals.py) ──────────────────────────────
-
-
-def ema(series: pd.Series, period: int) -> pd.Series:
-    return series.ewm(span=period, adjust=False).mean()
-
-
-def rsi(series: pd.Series, period: int = 14) -> pd.Series:
-    delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(span=period, adjust=False).mean()
-    avg_loss = loss.ewm(span=period, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    return 100 - (100 / (1 + rs))
-
-
-# ── Data ─────────────────────────────────────────────────────────────────────
-
-
-def fetch_close(ticker: str, years: int) -> pd.Series:
-    raw = yf.download(ticker, period=f"{years}y", interval="1d", auto_adjust=True, progress=False)
-    if raw.empty:
-        raise RuntimeError(f"No data for {ticker}")
-    if isinstance(raw.columns, pd.MultiIndex):
-        close = raw["Close"][ticker]
-    else:
-        close = raw["Close"]
-    return close.dropna()
-
 
 # ── Strategy variants ────────────────────────────────────────────────────────
 #
@@ -271,10 +237,6 @@ def rolling_30d_returns(equity: pd.Series) -> pd.Series:
 # ── Report formatting ────────────────────────────────────────────────────────
 
 
-def fmt_line(*cols, widths):
-    return "".join(str(c).ljust(w) for c, w in zip(cols, widths))
-
-
 def per_ticker_report(ticker: str, close: pd.Series, sim: dict, capital: float) -> str:
     equity = sim["equity"].dropna()
     trades = sim["trades"]
@@ -375,7 +337,7 @@ def compare_variants(tickers: list[str], years: int):
     closes = {}
     for t in tickers:
         try:
-            closes[t] = fetch_close(t, years)
+            closes[t] = fetch_close(t, period=f"{years}y")
         except Exception as e:
             print(f"{t}: ERROR fetching data — {e}")
     if not closes:
@@ -463,7 +425,7 @@ def main():
     results = {}
     for ticker in tickers:
         try:
-            close = fetch_close(ticker, years)
+            close = fetch_close(ticker, period=f"{years}y")
         except Exception as e:
             print(f"{ticker}: ERROR fetching data — {e}")
             continue

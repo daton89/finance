@@ -22,6 +22,8 @@ from pathlib import Path
 import yfinance as yf
 import pandas as pd
 
+from finance_core.market import convert_to_eur, _live_rate, fetch_closes
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if os.path.basename(SCRIPT_DIR) == "scripts":
     SCRIPT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -35,10 +37,6 @@ PORTFOLIO_PATH = os.path.join(SCRIPT_DIR, "portfolio.json")
 SWING_STATE_PATH = os.path.join(SCRIPT_DIR, "data", "swing_state.json")
 PM_STATE_PATH = os.path.join(DATA_DIR, "pm_state.json")  # our snapshots
 TARGET_ALLOCATION_PATH = os.path.join(CONFIG_DIR, "target_allocation.json")
-
-EUR_RATE = 0.92  # approximate USD→EUR
-GBP_RATE = 1.19  # approximate GBP→EUR (used for GBp too)
-GBP_TO_EUR = 1.19
 
 # ── Target allocation ──
 # These are the "ideal" splits the user wants
@@ -88,6 +86,16 @@ def load_satellite_tickers() -> set:
     return set()
 
 
+def load_semis_tickers() -> set:
+    """Ticker semiconductor dal config (fallback a lista storica)."""
+    if os.path.exists(TARGET_ALLOCATION_PATH):
+        with open(TARGET_ALLOCATION_PATH) as f:
+            semis = json.load(f).get("semis_tickers")
+            if semis:
+                return set(semis)
+    return {"MU", "AMD", "MRVL", "WDC"}
+
+
 def load_pm_state() -> dict:
     if os.path.exists(PM_STATE_PATH):
         with open(PM_STATE_PATH) as f:
@@ -101,80 +109,32 @@ def save_pm_state(state: dict):
 
 
 def fetch_prices(tickers: list[str]) -> dict:
-    """Fetch current prices for a list of tickers. Returns {ticker: price_in_EUR}."""
+    """Fetch current prices for a list of tickers. Returns {ticker: price}."""
     if not tickers:
         return {}
+    # Single-ticker via Ticker.info (has currentPrice/regularMarketPrice)
     prices = {}
     for t in tickers:
         try:
-            ticker = yf.Ticker(t)
-            info = ticker.info or {}
+            ticker_obj = yf.Ticker(t)
+            info = ticker_obj.info or {}
             price = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose")
             if price:
                 prices[t] = float(price)
-            else:
-                # fallback: download 1d
-                df = yf.download(t, period="1d", interval="1d", auto_adjust=True)
-                if not df.empty:
-                    col = df["Close"]
-                    if isinstance(col, pd.DataFrame):
-                        col = col[t]
-                    prices[t] = float(col.iloc[-1])
-        except:
+        except Exception:
+            pass
+    # Fallback: batch download for any tickers still missing
+    missing = [t for t in tickers if t not in prices]
+    if missing:
+        try:
+            batch = fetch_closes(missing, period="1d")
+            for t, s in batch.items():
+                if not s.empty:
+                    prices[t] = float(s.iloc[-1])
+        except Exception:
             pass
     return prices
 
-
-def get_price_single(ticker: str) -> float | None:
-    """Get price for a single ticker, with EUR conversion hint."""
-    try:
-        t = yf.Ticker(ticker)
-        info = t.info or {}
-        price = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose")
-        if price:
-            return float(price)
-        df = yf.download(ticker, period="1d", interval="1d", auto_adjust=True)
-        if not df.empty:
-            col = df["Close"]
-            if isinstance(col, pd.DataFrame):
-                col = col[ticker]
-            return float(col.iloc[-1])
-    except:
-        pass
-    return None
-
-
-_fx_cache: dict[str, float] = {}
-
-
-def _live_rate(pair: str, fallback: float) -> float:
-    """Tasso FX live da Yahoo (es. 'EURUSD=X'), con cache e fallback statico."""
-    if pair in _fx_cache:
-        return _fx_cache[pair]
-    try:
-        rate = float(yf.Ticker(pair).fast_info["last_price"])
-        if rate > 0:
-            _fx_cache[pair] = rate
-            return rate
-    except Exception:
-        pass
-    _fx_cache[pair] = fallback
-    return fallback
-
-
-def convert_to_eur(price: float, currency: str) -> float:
-    """Convert price to EUR for display. FX live con fallback statico."""
-    if currency in ("EUR",):
-        return price
-    usd_eur = 1.0 / _live_rate("EURUSD=X", 1.0 / EUR_RATE)
-    gbp_eur = _live_rate("GBPEUR=X", GBP_TO_EUR)
-    if currency == "GBp":
-        # GBp → GBP (÷100) → EUR
-        return (price / 100) * gbp_eur
-    if currency == "GBP":
-        return price * gbp_eur
-    # USD → EUR
-    return price * usd_eur
 
 
 # ── Portfolio Analysis ──
@@ -235,7 +195,7 @@ def analyze_portfolio() -> dict:
 
         current_price = None
         if price_ticker:
-            current_price = prices.get(price_ticker) or get_price_single(price_ticker)
+            current_price = prices.get(price_ticker)
 
         price_stale = False
         if current_price:
@@ -282,12 +242,12 @@ def analyze_portfolio() -> dict:
     result["allocation"]["by_type"] = {k: round(v, 1) for k, v in sorted(type_alloc.items(), key=lambda x: -x[1])}
 
     # Sector allocation (stocks only)
+    semis_tickers = load_semis_tickers()
     sector_alloc = {}
     for entry in result["positions"]:
         if entry["type"] == "stock":
-            # Simple heuristic: semiconductors vs other
             ticker = entry["ticker"]
-            if ticker in ("MU", "AMD", "MRVL", "WDC"):
+            if ticker in semis_tickers:
                 sector = "semiconductors"
             else:
                 sector = "other_stocks"
@@ -303,7 +263,7 @@ def analyze_portfolio() -> dict:
     for ticker, pos_data in swing_positions.items():
         shares = pos_data.get("shares", 0)
         entry_price = pos_data.get("entry_price", 0)
-        current_price = prices.get(ticker) or get_price_single(ticker)
+        current_price = prices.get(ticker)
 
         cost = shares * entry_price
         value = shares * (current_price or entry_price)

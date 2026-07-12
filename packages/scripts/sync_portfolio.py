@@ -27,93 +27,36 @@ PORTFOLIO_FILE = os.path.join(SCRIPT_DIR, 'portfolio.json')
 # ── Tipi di asset validi Scalable Capital ──
 _VALID_ASSET_TYPES = {"security", "etf", "etn"}
 
-# ── Mappatura ISIN → tipo posizione nota ──
-# Se il CSV non specifica l'asset type, usiamo questa per i tipi noti
-_KNOWN_ISIN_TYPES = {
-    "IE00B4ND3602": "etf",   # iShares Physical Gold ETC
-    "IE00B4NCWG09": "etf",   # iShares Physical Silver ETC
-    "IE00B5BMR087": "etf",   # iShares Core S&P 500
-    "IE00BKM4GZ66": "etf",   # iShares MSCI EM IMI
-    "LU2903252349": "etf",   # Xtrackers MSCI AC World
-    "IE00BF4RFH31": "etf",   # iShares MSCI World SC
-    "IE00B43HR379": "etf",   # iShares S&P 500 Health Care
-    "IE000I8KRLL9": "etf",   # iShares MSCI Global Semiconductors
-    "US5951121038": "stock",  # Micron
-    "US0079031078": "stock",  # AMD
-    "US80004C2008": "stock",  # SanDisk
-    "US5738741041": "stock",  # Marvell
-    "US9581021055": "stock",  # Western Digital
-    "US1999081045": "stock",  # Comfort Systems USA
-}
-
-# ── Mappatura ISIN → ticker Yahoo Finance nota ──
-_KNOWN_ISIN_TICKERS = {
-    "US5951121038": "MU",
-    "US0079031078": "AMD",
-    "US80004C2008": "SNDK",
-    "US5738741041": "MRVL",
-    "US9581021055": "WDC",
-    "US1999081045": "FIX",
-    "IE00B4ND3602": "IGLN.L",
-    "IE00B4NCWG09": "ISLN.L",
-    "IE00B5BMR087": "CSPX.L",
-    "IE00BKM4GZ66": "EMIM.L",
-    "LU2903252349": "",       # manual_only (Xtrackers)
-    "IE00BF4RFH31": "WSML.L",
-    "IE00B43HR379": "IUHC.L",
-    "IE000I8KRLL9": "SEC0.DE",
-}
-
-# ── Mappatura ISIN → nome posizione ──
-_KNOWN_ISIN_NAMES = {
-    "US5951121038": "Micron Technology",
-    "US0079031078": "Advanced Micro Devices",
-    "US80004C2008": "SanDisk Corp",
-    "US5738741041": "Marvell Technology",
-    "US9581021055": "Western Digital",
-    "US1999081045": "Comfort Systems USA",
-    "IE00B4ND3602": "iShares Physical Gold ETC",
-    "IE00B4NCWG09": "iShares Physical Silver ETC (Acc)",
-    "IE00B5BMR087": "iShares Core S&P 500 (Acc)",
-    "IE00BKM4GZ66": "iShares Core MSCI Emerging Markets IMI (Acc)",
-    "LU2903252349": "Scalable MSCI AC World Xtrackers (Acc)",
-    "IE00BF4RFH31": "iShares MSCI World Small Cap (Acc)",
-    "IE00B43HR379": "iShares S&P 500 Health Care Sector (Acc)",
-    "IE000I8KRLL9": "iShares MSCI Global Semiconductors (Acc)",
-}
-
-# ── Mappatura ISIN → currency Yahoo Finance ──
-# NB: verificate su yfinance fast_info 2026-07-12 — i ticker .L quotano
-# quasi tutti in USD (solo EMIM.L in GBp), NON in GBP.
-_KNOWN_ISIN_CURRENCIES = {
-    "US5951121038": "USD",
-    "US0079031078": "USD",
-    "US80004C2008": "USD",
-    "US5738741041": "USD",
-    "US9581021055": "USD",
-    "US1999081045": "USD",
-    "IE00B4ND3602": "USD",
-    "IE00B4NCWG09": "USD",
-    "IE00B5BMR087": "USD",
-    "IE00BKM4GZ66": "GBp",
-    "LU2903252349": "EUR",
-    "IE00BF4RFH31": "USD",
-    "IE00B43HR379": "USD",
-    "IE000I8KRLL9": "EUR",
-}
-
-# ── Mappatura ISIN → listing EUR (Xetra ≈ gettex/Scalable) ──
-# Usato da portfolio_manager per prezzi in EUR senza conversione FX.
-_KNOWN_ISIN_EUR_TICKERS = {
-    "IE00B5BMR087": "SXR8.DE",   # CSPX
-    "IE00BKM4GZ66": "IS3N.DE",   # EMIM
-    "IE00BF4RFH31": "IUSN.DE",   # WSML
-    "IE00B43HR379": "QDVG.DE",   # IUHC
-    "IE00B4ND3602": "PPFB.DE",   # IGLN
-    "US5951121038": "MTE.DE",    # MU
-    "US0079031078": "AMD.DE",    # AMD
-    "US9581021055": "WDC.DE",    # WDC
-    "LU2903252349": "SCWX.DE",   # Scalable MSCI AC World
+# ── Known instruments: single source of truth for ISIN → metadata ──
+_KNOWN_INSTRUMENTS = {
+    "IE00B4ND3602": {"ticker": "IGLN.L", "name": "iShares Physical Gold ETC",
+                      "type": "etf", "currency": "USD", "eur_ticker": "PPFB.DE"},
+    "IE00B4NCWG09": {"ticker": "ISLN.L", "name": "iShares Physical Silver ETC (Acc)",
+                      "type": "etf", "currency": "USD"},
+    "IE00B5BMR087": {"ticker": "CSPX.L", "name": "iShares Core S&P 500 (Acc)",
+                      "type": "etf", "currency": "USD", "eur_ticker": "SXR8.DE"},
+    "IE00BKM4GZ66": {"ticker": "EMIM.L", "name": "iShares Core MSCI Emerging Markets IMI (Acc)",
+                      "type": "etf", "currency": "GBp", "eur_ticker": "IS3N.DE"},
+    "LU2903252349": {"ticker": "", "name": "Scalable MSCI AC World Xtrackers (Acc)",
+                      "type": "etf", "currency": "EUR", "eur_ticker": "SCWX.DE"},
+    "IE00BF4RFH31": {"ticker": "WSML.L", "name": "iShares MSCI World Small Cap (Acc)",
+                      "type": "etf", "currency": "USD", "eur_ticker": "IUSN.DE"},
+    "IE00B43HR379": {"ticker": "IUHC.L", "name": "iShares S&P 500 Health Care Sector (Acc)",
+                      "type": "etf", "currency": "USD", "eur_ticker": "QDVG.DE"},
+    "IE000I8KRLL9": {"ticker": "SEC0.DE", "name": "iShares MSCI Global Semiconductors (Acc)",
+                      "type": "etf", "currency": "EUR"},
+    "US5951121038": {"ticker": "MU", "name": "Micron Technology",
+                      "type": "stock", "currency": "USD", "eur_ticker": "MTE.DE"},
+    "US0079031078": {"ticker": "AMD", "name": "Advanced Micro Devices",
+                      "type": "stock", "currency": "USD", "eur_ticker": "AMD.DE"},
+    "US80004C2008": {"ticker": "SNDK", "name": "SanDisk Corp",
+                      "type": "stock", "currency": "USD"},
+    "US5738741041": {"ticker": "MRVL", "name": "Marvell Technology",
+                      "type": "stock", "currency": "USD"},
+    "US9581021055": {"ticker": "WDC", "name": "Western Digital",
+                      "type": "stock", "currency": "USD", "eur_ticker": "WDC.DE"},
+    "US1999081045": {"ticker": "FIX", "name": "Comfort Systems USA",
+                      "type": "stock", "currency": "USD"},
 }
 
 
@@ -165,20 +108,19 @@ def read_portfolio() -> dict:
 def resolve_ticker(isin: str, description: str) -> str:
     """Risolve ticker Yahoo Finance per un ISIN.
 
-    Usa prima le mappature note, poi un fallback semplice.
+    Usa le mappature note. Per ISIN sconosciuti restituisce stringa vuota
+    (nessun ticker finto generato).
     """
-    if isin in _KNOWN_ISIN_TICKERS:
-        return _KNOWN_ISIN_TICKERS[isin]
-
-    # Fallback: genera ticker dal nome
-    words = description.upper().split()
-    ticker = "".join(w[:4] for w in words[:2])[:8] + ".DE"
-    return ticker
+    if isin in _KNOWN_INSTRUMENTS:
+        return _KNOWN_INSTRUMENTS[isin]["ticker"]
+    return ""
 
 
 def is_manual_only(isin: str) -> bool:
     """Restituisce True se la posizione è tracciata manualmente (senza ticker)."""
-    return isin in _KNOWN_ISIN_TICKERS and _KNOWN_ISIN_TICKERS[isin] == ""
+    if isin in _KNOWN_INSTRUMENTS:
+        return _KNOWN_INSTRUMENTS[isin]["ticker"] == ""
+    return True
 
 
 def parse_scalable_csv(filepath: str) -> list[dict]:
@@ -298,9 +240,12 @@ def compute_fifo_cost_basis(transactions: list[dict]) -> list[dict]:
         remaining_shares = round(remaining_shares, 4)
 
         ticker = resolve_ticker(isin, data["description"])
-        name = _KNOWN_ISIN_NAMES.get(isin, data["description"])
-        currency = _KNOWN_ISIN_CURRENCIES.get(isin, "EUR")
-        pos_type = _KNOWN_ISIN_TYPES.get(isin, "stock")
+        meta = _KNOWN_INSTRUMENTS.get(isin, {})
+        if not meta:
+            print(f"⚠️ ISIN {isin} ({data['description']}) sconosciuto — aggiungilo a _KNOWN_INSTRUMENTS per prezzi live")
+        name = meta.get("name", data["description"])
+        currency = meta.get("currency", "EUR")
+        pos_type = meta.get("type", "stock")
         manual = is_manual_only(isin)
 
         pos = {
@@ -314,15 +259,13 @@ def compute_fifo_cost_basis(transactions: list[dict]) -> list[dict]:
             "type": pos_type,
         }
 
-        eur_ticker = _KNOWN_ISIN_EUR_TICKERS.get(isin)
+        eur_ticker = meta.get("eur_ticker")
         if eur_ticker:
             pos["eur_ticker"] = eur_ticker
 
+        pos["yf_currency"] = currency
         if not ticker:
-            pos["yf_currency"] = currency
             pos["manual_only"] = True
-        else:
-            pos["yf_currency"] = currency
 
         result.append(pos)
 

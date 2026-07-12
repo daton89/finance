@@ -21,9 +21,7 @@ import sys
 from datetime import datetime, date, timedelta
 from typing import Optional, Union
 
-import yfinance as yf
-import pandas as pd
-import numpy as np
+from finance_core.market import rsi, fetch_closes
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if os.path.basename(SCRIPT_DIR) == "scripts":
@@ -31,17 +29,6 @@ if os.path.basename(SCRIPT_DIR) == "scripts":
 
 PORTFOLIO_FILE = os.path.join(SCRIPT_DIR, "portfolio.json")
 TARGET_FILE = os.path.join(SCRIPT_DIR, "config", "target_allocation.json")
-
-
-def rsi(series: pd.Series, period: int = 14) -> pd.Series:
-    """Compute RSI(14) — same implementation as swing_signals.py."""
-    delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(span=period, adjust=False).mean()
-    avg_loss = loss.ewm(span=period, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    return 100 - (100 / (1 + rs))
 
 
 def load_portfolio() -> list[dict]:
@@ -92,44 +79,20 @@ def get_backstop_date(ticker: str, backstops: dict) -> date:
     return datetime.strptime(backstops.get("default", "2026-10-31"), "%Y-%m-%d").date()
 
 
-def fetch_and_compute_rsi(ticker: str) -> Optional[float]:
-    """
-    Fetch ~3 months of daily closes and compute RSI(14).
-    Handle MultiIndex columns like swing_signals.py does.
-    Returns RSI value or None if fetch failed.
-    """
-    try:
-        raw = yf.download(ticker, period="3mo", interval="1d", auto_adjust=True)
-        if raw.empty:
-            return None
-
-        # Extract Close series, handling MultiIndex columns
-        if isinstance(raw.columns, pd.MultiIndex):
-            close = raw["Close"][ticker]
-        else:
-            close = raw["Close"]
-
-        if len(close) < 2:
-            return None
-
-        rsi_vals = rsi(close, 14)
-        return float(rsi_vals.iloc[-1])
-    except Exception:
-        return None
-
-
-def check_ticker(ticker: str, backstops: dict, verbose: bool = False) -> list[str]:
+def check_ticker(ticker: str, backstops: dict, close: "pd.Series | None",
+                  verbose: bool = False) -> list[str]:
     """
     Check a single ticker and return output lines (may be empty).
+    close: pre-fetched price series (from batch download), or None if unavailable.
     """
     lines = []
 
-    # Fetch RSI
-    rsi_val = fetch_and_compute_rsi(ticker)
-
-    if rsi_val is None:
+    # Compute RSI from pre-fetched data
+    if close is None or len(close) < 2:
         lines.append(f"⚠️ {ticker}: dati non disponibili")
         return lines
+
+    rsi_val = float(rsi(close, 14).iloc[-1])
 
     # Backstop date
     backstop = get_backstop_date(ticker, backstops)
@@ -167,10 +130,15 @@ def main():
             print("✅ Nessuna posizione stock in dismissione")
         return
 
-    # Check each ticker
+    # Batch download all in-scope tickers at once
+    tickers = [item["ticker"] for item in in_scope]
+    all_closes = fetch_closes(tickers, period="3mo")
+
+    # Check each ticker with pre-fetched data
     all_lines = []
     for item in in_scope:
-        lines = check_ticker(item["ticker"], backstops, verbose)
+        close = all_closes.get(item["ticker"])
+        lines = check_ticker(item["ticker"], backstops, close, verbose)
         all_lines.extend(lines)
 
     # Output

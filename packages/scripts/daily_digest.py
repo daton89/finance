@@ -14,6 +14,7 @@ section is replaced with a "SCRIPT FAILED" notice containing the error.
 
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from pathlib import Path
 
@@ -52,7 +53,6 @@ def run_script(cmd: list[str]) -> str:
 
     if result.returncode != 0:
         err = (result.stderr or "").strip() or "no stderr output"
-        # Include any partial stdout too, since it may still contain useful info.
         out = (result.stdout or "").strip()
         section = f"SCRIPT FAILED: {script_path}: exit code {result.returncode}: {err}"
         if out:
@@ -66,9 +66,20 @@ def main() -> None:
     today = date.today().isoformat()
     lines = [f"DAILY DIGEST — {today}", ""]
 
-    for label, cmd in SCRIPTS:
+    # Submit all scripts in parallel, preserving section order in output
+    with ThreadPoolExecutor(max_workers=len(SCRIPTS)) as executor:
+        future_to_idx = {
+            executor.submit(run_script, cmd): idx
+            for idx, (_, cmd) in enumerate(SCRIPTS)
+        }
+        results = [None] * len(SCRIPTS)
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            results[idx] = future.result()
+
+    for (label, _), output in zip(SCRIPTS, results):
         lines.append(f"=== {label} ===")
-        lines.append(run_script(cmd))
+        lines.append(output)
         lines.append("")
 
     print("\n".join(lines).rstrip() + "\n")
